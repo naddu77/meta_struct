@@ -22,7 +22,7 @@
 // SqlType: 클래스 템플릿 특수화
 //  - ReadRowInto: 타입에 맞게 읽기
 //  - BindImpl: 타입에 맞게 바인딩
-// ToConcrete: 구체적인 타입으로 변환
+//  - ToConcrete: 구체적인 타입으로 변환
 
 namespace NDatabase
 {
@@ -97,6 +97,11 @@ namespace NDatabase
 
 				return r == SQLITE_OK;
 			}
+
+			inline static auto ToConcrete(std::int64_t i)
+			{
+				return i;
+			}
 		};
 
 		template <>
@@ -126,6 +131,11 @@ namespace NDatabase
 				auto r{ sqlite3_bind_double(stmt, index, v) };
 
 				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(double d)
+			{
+				return d;
 			}
 		};
 
@@ -159,6 +169,11 @@ namespace NDatabase
 				auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
 
 				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::string_view const& v)
+			{
+				return std::string{ v };
 			}
 		};
 
@@ -200,6 +215,16 @@ namespace NDatabase
 
 				return r == SQLITE_OK;
 			}
+
+			inline static auto ToConcrete(std::string const& v)
+			{
+				return v;
+			}
+
+			inline static auto ToConcrete(bool b)
+			{
+				return b;
+			}
 		};
 
 		template <>
@@ -236,6 +261,11 @@ namespace NDatabase
 				auto r{ sqlite3_bind_text(stmt, index, str.c_str(), static_cast<int>(std::size(str)), SQLITE_TRANSIENT) };
 
 				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::chrono::system_clock::time_point const& v)
+			{
+				return v;
 			}
 		};
 
@@ -302,6 +332,32 @@ namespace NDatabase
 					auto r{ sqlite3_bind_null(stmt, index) };
 
 					return r == SQLITE_OK;
+				}
+			}
+
+			template <typename T>
+			inline static auto ToConcrete(std::optional<T> const& o) -> std::optional<decltype(SqlType<T>::ToConcrete(std::declval<T>()))>
+			{
+				if (!o)
+				{
+					return std::nullopt;
+				}
+				else
+				{
+					return SqlType<T>::ToConcrete(*o);
+				}
+			}
+
+			template <typename T>
+			inline static auto ToConcrete(std::optional<T>&& o) -> std::optional<decltype(SqlType<T>::ToConcrete(std::declval<T>()))>
+			{
+				if (!o)
+				{
+					return std::nullopt;
+				}
+				else
+				{
+					return SqlType<T>::ToConcrete(std::move(*o));
 				}
 			}
 		};
@@ -426,72 +482,18 @@ namespace NDatabase
 			}
 		};
 
-		auto ToConcrete(std::string_view const& v)
-		{
-			return std::string{ v };
-		}
-
-		auto ToConcrete(std::string const& v)
-		{
-			return v;
-		}
-
-		auto ToConcrete(std::chrono::system_clock::time_point const& v)
-		{
-			return v;
-		}
-
-		auto ToConcrete(std::int64_t i)
-		{
-			return i;
-		}
-
-		auto ToConcrete(double d)
-		{
-			return d;
-		}
-
-		auto ToConcrete(bool b)
-		{
-			return b;
-		}
-
-		template <typename T>
-		auto ToConcrete(std::optional<T> const& o) -> std::optional<decltype(ToConcrete(std::declval<T>()))>
-		{
-			if (!o)
-			{
-				return std::nullopt;
-			}
-			else
-			{
-				return ToConcrete(*o);
-			}
-		}
-
-		template <typename T>
-		auto ToConcrete(std::optional<T>&& o) -> std::optional<decltype(ToConcrete(std::declval<T>()))>
-		{
-			if (!o)
-			{
-				return std::nullopt;
-			}
-			else
-			{
-				return ToConcrete(std::move(*o));
-			}
-		}
-
 		template <auto... Tags, typename... Ts, auto... Init>
 		auto ToConcrete(NDataStructure::TaggedTuple<NDataStructure::Member<Tags, Ts, Init>...> const& t)
 		{
-			return NDataStructure::TaggedTuple{ (NDataStructure::tag<Tags> = ToConcrete(NDataStructure::Get<Tags>(t)))... };
+			return NDataStructure::TaggedTuple{ (NDataStructure::tag<Tags> 
+				= SqlType<std::remove_cvref_t<decltype(NDataStructure::Get<Tags>(t))>>::ToConcrete(NDataStructure::Get<Tags>(t)))...};
 		}
 
 		template <auto... Tags, typename... Ts, auto... Init>
 		auto ToConcrete(NDataStructure::TaggedTuple<NDataStructure::Member<Tags, Ts, Init>...>&& t)
 		{
-			return NDataStructure::TaggedTuple{ (NDataStructure::tag<Tags> = ToConcrete(NDataStructure::Get<Tags>(std::move(t))))... };
+			return NDataStructure::TaggedTuple{ (NDataStructure::tag<Tags> 
+				= SqlType<std::remove_cvref_t<decltype(NDataStructure::Get<Tags>(std::move(t)))>>::ToConcrete(NDataStructure::Get<Tags>(std::move(t))))... };
 		}	
 
 		template <bool make_optional, typename Tag, typename T, auto Init>

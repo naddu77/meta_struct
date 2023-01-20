@@ -75,7 +75,7 @@ int main()
         NDatabase::Bind<"drive_name">("12"),
         NDatabase::Bind<"auto_login">(13),
         NDatabase::Bind<"last_login_time">(std::format("{}", std::chrono::system_clock::now())),
-        NDatabase::Bind<"reserved">("15"),
+        NDatabase::Bind<"reserved">("15"sv),
         NDatabase::Bind<"reserved2">("'1\"'6")
     });
 
