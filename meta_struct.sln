@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TaggedTupleSource", "Tagged
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TaggedSqlSource", "TaggedSqlSource\TaggedSqlSource.vcxproj", "{1CDEF8AB-F4A2-406C-92DC-D35166C6D9EB}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "real_test", "real_test\real_test.vcxproj", "{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -51,6 +53,14 @@ Global
 		{1CDEF8AB-F4A2-406C-92DC-D35166C6D9EB}.Release|x64.Build.0 = Release|x64
 		{1CDEF8AB-F4A2-406C-92DC-D35166C6D9EB}.Release|x86.ActiveCfg = Release|Win32
 		{1CDEF8AB-F4A2-406C-92DC-D35166C6D9EB}.Release|x86.Build.0 = Release|Win32
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Debug|x64.ActiveCfg = Debug|x64
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Debug|x64.Build.0 = Debug|x64
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Debug|x86.ActiveCfg = Debug|Win32
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Debug|x86.Build.0 = Debug|Win32
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Release|x64.ActiveCfg = Release|x64
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Release|x64.Build.0 = Release|x64
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Release|x86.ActiveCfg = Release|Win32
+		{DD1D13E8-4434-4E8D-88AE-F66FEE3C7C6D}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
