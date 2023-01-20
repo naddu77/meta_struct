@@ -18,14 +18,294 @@
 #include "TaggedTuple.h"
 
 // Data 추가 시 오버로딩해야할 메서드
-// ReadRowInto: 타입에 맞게 읽기
-// BindImpl: 타입에 맞게 바인딩
-// ToConcrete: ?
+// StringToType: 타입 선언
+// SqlType: 클래스 템플릿 특수화
+//  - ReadRowInto: 타입에 맞게 읽기
+//  - BindImpl: 타입에 맞게 바인딩
+// ToConcrete: 구체적인 타입으로 변환
 
 namespace NDatabase
 {
 	namespace Sqlite3
 	{
+		using NDataStructure::InternalTaggedTuple::FixedString;
+
+		template <FixedString>
+		struct StringToType;
+
+		template <>
+		struct StringToType<"integer">
+		{
+			using type = std::int64_t;
+		};
+
+		template <>
+		struct StringToType<"text">
+		{
+			using type = std::string;
+		};
+
+		template <>
+		struct StringToType<"real">
+		{
+			using type = double;
+		};
+
+		template <>
+		struct StringToType<"bool">
+		{
+			using type = bool;
+		};
+
+		template <>
+		struct StringToType<"date">
+		{
+			using type = std::chrono::system_clock::time_point;
+		};
+
+		template <FixedString fs>
+		using StringToType_t = typename StringToType<fs>::type;
+
+		template <typename T>
+		class SqlType;
+
+		template <>
+		class SqlType<std::int64_t>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::int64_t& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
+				{
+					v = sqlite3_column_int64(stmt, index);
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::int64_t v)
+			{
+				auto r{ sqlite3_bind_int64(stmt, index, v) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <>
+		class SqlType<double>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, double& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_FLOAT)
+				{
+					v = sqlite3_column_double(stmt, index);
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, double v)
+			{
+				auto r{ sqlite3_bind_double(stmt, index, v) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <>
+		class SqlType<std::string_view>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::string_view& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					v = std::string_view{ ptr, ptr ? length : 0 };
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::string_view v)
+			{
+				auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <>
+		class SqlType<std::string>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::string& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					if (ptr)
+					{
+						v = std::string{ ptr, length };
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::string v)
+			{
+				auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <>
+		class SqlType<std::chrono::system_clock::time_point>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::chrono::system_clock::time_point& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					if (ptr)
+					{
+						std::istringstream{ ptr } >> std::chrono::parse("%F %T", v);
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::chrono::system_clock::time_point v)
+			{
+				auto str{ std::format("{}", v) };
+				auto r{ sqlite3_bind_text(stmt, index, str.c_str(), static_cast<int>(std::size(str)), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <>
+		class SqlType<bool>
+		{
+		public:
+			inline bool ReadRowInto(sqlite3_stmt* stmt, int index, bool& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
+				{
+					v = static_cast<bool>(sqlite3_column_int(stmt, index));
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, bool v)
+			{
+				auto r{ sqlite3_bind_int(stmt, index, static_cast<int>(v)) };
+
+				return r == SQLITE_OK;
+			}
+		};
+
+		template <typename T>
+		class SqlType<std::optional<T>>
+		{
+		public:
+			template <typename T>
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::optional<T>& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_NULL)
+				{
+					v = std::nullopt;
+
+					return true;
+				}
+				else
+				{
+					v.emplace();
+
+					return SqlType<T>::ReadRowInto(stmt, index, *v);
+				}
+			}
+
+			template <typename T>
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::optional<T> const& v)
+			{
+				if (v.has_value())
+				{
+					return SqlType<T>::BindImpl(stmt, index, *v);
+				}
+				else
+				{
+					auto r{ sqlite3_bind_null(stmt, index) };
+
+					return r == SQLITE_OK;
+				}
+			}
+		};
+
 		template <typename T, typename... GoodValues>
 		void CheckSqliteReturn(T r, GoodValues... good_values)
 		{
@@ -52,150 +332,6 @@ namespace NDatabase
 			}
 		}
 
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, std::int64_t& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
-			{
-				v = sqlite3_column_int64(stmt, index);
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, double& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_FLOAT)
-			{
-				v = sqlite3_column_double(stmt, index);
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, std::string_view& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
-			{
-				auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
-				auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
-
-				v = std::string_view{ ptr, ptr ? length : 0 };
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, std::string& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
-			{
-				auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
-				auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
-
-				if (ptr)
-				{
-					v = std::string{ ptr, length };
-				}
-				else
-				{
-					v.clear();
-				}
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, std::chrono::system_clock::time_point& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
-			{
-				auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
-				auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
-
-				if (ptr)
-				{
-					std::istringstream{ ptr } >> std::chrono::parse("%F %T", v);
-				}
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, bool& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
-			{
-				v = static_cast<bool>(sqlite3_column_int(stmt, index));
-
-				return true;
-			}
-			else if (type == SQLITE_NULL)
-			{
-				return false;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		template <typename T>
-		inline bool ReadRowInto(sqlite3_stmt* stmt, int index, std::optional<T>& v)
-		{
-			if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_NULL)
-			{
-				v = std::nullopt;
-
-				return true;
-			}
-			else
-			{
-				v.emplace();
-
-				return ReadRowInto(stmt, index, *v);
-			}
-		}
-
 		template <typename RowType>
 		auto ReadRow(sqlite3_stmt* stmt)
 		{
@@ -213,7 +349,7 @@ namespace NDatabase
 			auto index{ 0 };
 
 			row.ForEach([&](auto& m) mutable {
-				ReadRowInto(stmt, index, m.Value());
+				SqlType<std::remove_cvref_t<decltype(m.Value())>>::ReadRowInto(stmt, index, m.Value());
 				++index;
 			});
 
@@ -290,64 +426,6 @@ namespace NDatabase
 			}
 		};
 
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, double v)
-		{
-			auto r{ sqlite3_bind_double(stmt, index, v) };
-
-			return r == SQLITE_OK;
-		}
-
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, std::int64_t v)
-		{
-			auto r{ sqlite3_bind_int64(stmt, index, v) };
-
-			return r == SQLITE_OK;
-		}
-
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, std::string_view v)
-		{
-			auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
-
-			return r == SQLITE_OK;
-		}
-
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, std::string v)
-		{
-			auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
-
-			return r == SQLITE_OK;
-		}
-
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, std::chrono::system_clock::time_point v)
-		{
-			auto str{ std::format("{}", v) };
-			auto r{ sqlite3_bind_text(stmt, index, str.c_str(), static_cast<int>(std::size(str)), SQLITE_TRANSIENT)};
-
-			return r == SQLITE_OK;
-		}
-
-		inline bool BindImpl(sqlite3_stmt* stmt, int index, bool v)
-		{
-			auto r{ sqlite3_bind_int(stmt, index, static_cast<int>(v)) };
-
-			return r == SQLITE_OK;
-		}
-
-		template <typename T>
-		bool BindImpl(sqlite3_stmt* stmt, int index, std::optional<T> const& v)
-		{
-			if (v.has_value())
-			{
-				return BindImpl(stmt, index, *v);
-			}
-			else
-			{
-				auto r{ sqlite3_bind_null(stmt, index) };
-
-				return r == SQLITE_OK;
-			}
-		}
-
 		auto ToConcrete(std::string_view const& v)
 		{
 			return std::string{ v };
@@ -414,15 +492,7 @@ namespace NDatabase
 		auto ToConcrete(NDataStructure::TaggedTuple<NDataStructure::Member<Tags, Ts, Init>...>&& t)
 		{
 			return NDataStructure::TaggedTuple{ (NDataStructure::tag<Tags> = ToConcrete(NDataStructure::Get<Tags>(std::move(t))))... };
-		}
-
-		using NDataStructure::InternalTaggedTuple::FixedString;
-
-		template <FixedString fs>
-		struct CompileString
-		{
-			// Nothing
-		};
+		}	
 
 		template <bool make_optional, typename Tag, typename T, auto Init>
 		constexpr auto MaybeMakeOptional(NDataStructure::InternalTaggedTuple::MemberImpl<Tag, T, Init> m)
@@ -436,42 +506,6 @@ namespace NDatabase
 				return m;
 			}
 		}
-
-		template <typename>
-		struct StringToType;
-
-		template <>
-		struct StringToType<CompileString<"integer">>
-		{
-			using type = std::int64_t;
-		};
-
-		template <>
-		struct StringToType<CompileString<"text">>
-		{
-			using type = std::string;
-		};
-
-		template <>
-		struct StringToType<CompileString<"real">>
-		{
-			using type = double;
-		};
-
-		template <>
-		struct StringToType<CompileString<"bool">>
-		{
-			using type = bool;
-		};
-
-		template <>
-		struct StringToType<CompileString<"date">>
-		{
-			using type = std::chrono::system_clock::time_point;
-		};
-
-		template <typename T>
-		using StringToType_t = typename StringToType<T>::type;
 
 		constexpr std::string_view start_group{ "{{" };
 		constexpr std::string_view end_group{ "}}" };
@@ -723,7 +757,7 @@ namespace NDatabase
 			constexpr FixedString<ts.name.second> name{ sv.substr(ts.name.first, ts.name.second) };
 			constexpr FixedString<ts.type.second> type{ sv.substr(ts.type.first, ts.type.second) };
 
-			return MaybeMakeOptional<ts.optional>(NDataStructure::tag<name> = (StringToType_t<CompileString<type>>{}));
+			return MaybeMakeOptional<ts.optional>(NDataStructure::tag<name> = (StringToType_t<type>{}));
 		}
 
 		template <FixedString query_string, TypeSpecs ts, std::size_t... Is>
@@ -770,7 +804,7 @@ namespace NDatabase
 			p_tuple.ForEach([&](auto& m) mutable {
 				using m_t = std::decay_t<decltype(m)>;
 				using Tag = typename m_t::TagType;
-				auto r{ BindImpl(stmt, index, m.Value()) };
+				auto r{ SqlType<std::remove_cvref_t<decltype(m.Value())>>::BindImpl(stmt, index, m.Value()) };
 
 				CheckSqliteReturn<bool>(r, true);
 

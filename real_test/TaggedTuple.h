@@ -296,6 +296,7 @@ namespace NDataStructure
 				// Nothing
 			}
 
+			// Note: std::string_view는 std::string에 바로 대입이 되지 않으므로 이 생성자가 필요함
 			template <typename Self, auto OtherInit>
 			constexpr MemberImpl(Self& self, MemberImpl<Tag, std::string_view, OtherInit>& other)
 				: MemberImpl{ self, std::string{ other.value } }
