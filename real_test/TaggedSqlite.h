@@ -14,6 +14,7 @@
 #include <utility>
 #include <chrono>
 #include <sstream>
+#include <filesystem>
 
 #include "TaggedTuple.h"
 
@@ -40,9 +41,21 @@ namespace NDatabase
 		};
 
 		template <>
-		struct StringToType<"text">
+		struct StringToType<"ansi">
 		{
 			using type = std::string;
+		};
+
+		template <>
+		struct StringToType<"text">
+		{
+			using type = std::u8string;
+		};
+
+		template <>
+		struct StringToType<"utf16">
+		{
+			using type = std::u16string;
 		};
 
 		template <>
@@ -61,6 +74,12 @@ namespace NDatabase
 		struct StringToType<"date">
 		{
 			using type = std::chrono::system_clock::time_point;
+		};
+
+		template <>
+		struct StringToType<"path">
+		{
+			using type = std::filesystem::path;
 		};
 
 		template <FixedString fs>
@@ -190,7 +209,7 @@ namespace NDatabase
 
 					if (ptr)
 					{
-						v = std::string{ ptr, length };
+						v = std::string{ ptr, length / sizeof(std::string::value_type) };
 					}
 					else
 					{
@@ -211,7 +230,7 @@ namespace NDatabase
 
 			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::string v)
 			{
-				auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)), SQLITE_TRANSIENT) };
+				auto r{ sqlite3_bind_text(stmt, index, std::data(v), static_cast<int>(std::size(v)) * sizeof(std::string::value_type), SQLITE_TRANSIENT) };
 
 				return r == SQLITE_OK;
 			}
@@ -224,6 +243,141 @@ namespace NDatabase
 			inline static auto ToConcrete(bool b)
 			{
 				return b;
+			}
+		};
+
+		template <>
+		class SqlType<std::u8string>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::u8string& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					if (ptr)
+					{
+						v = std::u8string{ reinterpret_cast<char8_t const*>(ptr), length / sizeof(std::u8string::value_type) };
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::u8string v)
+			{
+				auto r{ sqlite3_bind_text(stmt, index, reinterpret_cast<char const *>(v.c_str()), static_cast<int>(std::size(v)) * sizeof(std::u8string::value_type), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::u8string const& v)
+			{
+				return v;
+			}
+		};
+
+		template <>
+		class SqlType<std::wstring>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::wstring& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					if (ptr)
+					{
+						v = std::wstring{ reinterpret_cast<wchar_t const*>(ptr), length / sizeof(std::wstring::value_type) };
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::wstring v)
+			{
+				auto r{ sqlite3_bind_text(stmt, index, reinterpret_cast<char const*>(v.c_str()), static_cast<int>(std::size(v)) * sizeof(std::wstring::value_type), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::wstring const& v)
+			{
+				return v;
+			}
+		};
+
+		template <>
+		class SqlType<std::u16string>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::u16string& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) };
+
+					if (ptr)
+					{
+						v = std::u16string{ reinterpret_cast<char16_t const*>(ptr), length / sizeof(std::u16string::value_type)};
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::u16string v)
+			{
+				auto r{ sqlite3_bind_text(stmt, index, reinterpret_cast<char const*>(v.c_str()), static_cast<int>(std::size(v)) * sizeof(std::u16string::value_type), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::u16string const& v)
+			{
+				return v;
 			}
 		};
 
@@ -296,6 +450,62 @@ namespace NDatabase
 				auto r{ sqlite3_bind_int(stmt, index, static_cast<int>(v)) };
 
 				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(bool b)
+			{
+				return b;
+			}
+		};
+
+		template <>
+		class SqlType<std::filesystem::path>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::filesystem::path& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_TEXT)
+				{
+					auto ptr{ reinterpret_cast<char8_t const*>(sqlite3_column_text(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) / sizeof(std::u8string::value_type) };
+
+					if (ptr)
+					{
+						v = std::u8string_view{ ptr, length };
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::filesystem::path v)
+			{
+				auto str{ v.u8string() };
+				auto r{ sqlite3_bind_text(stmt, index, reinterpret_cast<char const*>(str.c_str()), static_cast<int>(std::size(str)) * sizeof(typename decltype(str)::value_type), SQLITE_TRANSIENT)};
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::filesystem::path const& v)
+			{
+				return v;
+			}
+
+			inline static auto ToConcrete(bool b)
+			{
+				return b;
 			}
 		};
 
