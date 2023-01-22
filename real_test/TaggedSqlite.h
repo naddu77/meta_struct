@@ -1,7 +1,7 @@
 #pragma once
+#include "TaggedTuple.h"
 #include <cassert>
 #include <sqlite3.h>
-
 #include <array>
 #include <cstdint>
 #include <exception>
@@ -15,8 +15,6 @@
 #include <chrono>
 #include <sstream>
 #include <filesystem>
-
-#include "TaggedTuple.h"
 
 // Data 추가 시 오버로딩해야할 메서드
 // StringToType: 타입 선언
@@ -38,6 +36,12 @@ namespace NDatabase
 		struct StringToType<"integer">
 		{
 			using type = std::int64_t;
+		};
+
+		template <>
+		struct StringToType<"int">
+		{
+			using type = int;
 		};
 
 		template <>
@@ -86,6 +90,90 @@ namespace NDatabase
 		using StringToType_t = typename StringToType<fs>::type;
 
 		template <typename T>
+		struct TypeToString;
+
+		template <>
+		struct TypeToString<std::int64_t>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "integer" };
+			}
+		};
+
+		template <>
+		struct TypeToString<int>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "int" };
+			}
+		};
+
+		template <>
+		struct TypeToString<std::string>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "ansi" };
+			}
+		};
+
+		template <>
+		struct TypeToString<std::u8string>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "text" };
+			}
+		};
+
+		template <>
+		struct TypeToString<std::u16string>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "utf16" };
+			}
+		};
+
+		template <>
+		struct TypeToString<double>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "double" };
+			}
+		};
+
+		template <>
+		struct TypeToString<bool>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "bool" };
+			}
+		};
+
+		template <>
+		struct TypeToString<std::chrono::system_clock::time_point>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "date" };
+			}
+		};
+
+		template <>
+		struct TypeToString<std::filesystem::path>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "path" };
+			}
+		};
+
+		template <typename T>
 		class SqlType;
 
 		template <>
@@ -118,6 +206,41 @@ namespace NDatabase
 			}
 
 			inline static auto ToConcrete(std::int64_t i)
+			{
+				return i;
+			}
+		};
+
+		template <>
+		class SqlType<int>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, int& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
+				{
+					v = sqlite3_column_int(stmt, index);
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, int v)
+			{
+				auto r{ sqlite3_bind_int64(stmt, index, v) };
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(int i)
 			{
 				return i;
 			}
@@ -427,7 +550,7 @@ namespace NDatabase
 		class SqlType<bool>
 		{
 		public:
-			inline bool ReadRowInto(sqlite3_stmt* stmt, int index, bool& v)
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, bool& v)
 			{
 				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_INTEGER)
 				{
@@ -502,11 +625,6 @@ namespace NDatabase
 			{
 				return v;
 			}
-
-			inline static auto ToConcrete(bool b)
-			{
-				return b;
-			}
 		};
 
 		template <typename T>
@@ -569,6 +687,63 @@ namespace NDatabase
 				{
 					return SqlType<T>::ToConcrete(std::move(*o));
 				}
+			}
+		};
+
+		template <FixedString fs, typename T>
+		class NameAndType
+		{
+		public:
+			using value_type = T;
+
+			constexpr auto Name() const
+			{
+				return fs;
+			}
+
+			constexpr auto operator()() const
+			{
+				return fs;
+			}
+
+			constexpr auto Decl() const
+			{
+				using namespace NDataStructure::Literals;
+
+				return "?/*:"_fs + fs + ":" + TypeToString<T>::To() + "*/";
+			}
+
+			constexpr auto Column() const
+			{
+				using namespace NDataStructure::Literals;
+
+				return fs + "/*:" + TypeToString<T>::To() + "*/";
+			}
+		};
+
+		template <FixedString fs, typename T>
+		class NameAndType<fs, std::optional<T>>
+		{
+		public:
+			using value_type = std::optional<T>;
+
+			constexpr auto Name() const
+			{
+				return fs;
+			}
+
+			constexpr auto Decl() const
+			{
+				using namespace NDataStructure::Literals;
+
+				return "?/*:"_fs + fs + ":" + TypeToString<T>::To() + "?*/";
+			}
+
+			constexpr auto Column() const
+			{
+				using namespace NDataStructure::Literals;
+
+				return fs + "/*:" + TypeToString<T>::To() + "?*/";
 			}
 		};
 
@@ -730,7 +905,7 @@ namespace NDatabase
 			std::size_t fields;
 			std::size_t params;
 
-			auto operator<=>(TypeSpecsCount const&) const = default;
+			constexpr auto operator<=>(TypeSpecsCount const&) const = default;
 		};
 
 		inline constexpr std::string_view start_comment{ "/*:" };
@@ -795,7 +970,7 @@ namespace NDatabase
 		template <std::size_t N>
 		struct TypeSpecs
 		{
-			auto operator<=>(TypeSpecs const&) const = default;
+			constexpr auto operator<=>(TypeSpecs const&) const = default;
 			TypeSpec data[N];
 
 			static constexpr std::size_t size()
@@ -1138,10 +1313,26 @@ namespace NDatabase
 			return NDataStructure::Get<fs>(std::forward<T>(t));
 		}
 
+		// NAT = NameAndType
+		template <auto NAT, typename T>
+			requires requires { NAT.Name(); }
+		decltype(auto) Field(T&& t)
+		{
+			return NDataStructure::Get<NAT.Name()>(std::forward<T>(t));
+		}
+
 		template <FixedString fs, typename T>
 		auto Bind(T&& t)
 		{
 			return NDataStructure::tag<fs> = std::forward<T>(t);
+		}
+
+		// NAT = NameAndType
+		template <auto NAT, typename T>
+			requires requires { NAT.Name(); }
+		auto Bind(T&& t)
+		{
+			return NDataStructure::tag<NAT.Name()> = std::forward<T>(t);
 		}
 
 		//template <typename Tag>

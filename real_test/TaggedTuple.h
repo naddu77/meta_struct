@@ -22,17 +22,24 @@ namespace NDataStructure
 
 			constexpr FixedString(std::string_view s)
 			{
-				std::copy_n(std::data(s), N, std::begin(data));
+				std::copy_n(std::data(s), std::size(s), std::begin(data));
+			}
+
+			constexpr FixedString(std::string_view s1, std::string_view s2)
+			{
+				std::copy_n(std::data(s1), std::size(s1), std::begin(data));
+				std::copy_n(std::data(s2), std::size(s2), std::next(std::begin(data), std::size(s1)));
 			}
 
 			constexpr FixedString(std::string const& s)
 			{
-				std::copy_n(std::data(s), N, std::begin(data));
+				std::copy_n(std::data(s), std::size(s), std::begin(data));
 			}
 
 			auto operator<=>(FixedString const&) const = default;
 
 			char data[N + 1]{};
+			static std::size_t const length{ N };
 
 			constexpr std::string_view ToStringView() const
 			{
@@ -55,6 +62,36 @@ namespace NDataStructure
 
 		template <std::size_t N>
 		FixedString(FixedString<N>)->FixedString<N>;
+
+		template <
+			std::size_t N1,
+			std::size_t N2
+		>
+		constexpr auto operator+(
+			FixedString<N1> const& fs1,
+			FixedString<N2> const& fs2)
+		{
+			FixedString<N1 + N2> result{ fs1.ToStringView() };
+
+			std::copy_n(fs2.data, N2, result.data + N1);
+
+			return result;
+		}
+
+		template <
+			std::size_t N1,
+			std::size_t N2
+		>
+		constexpr auto operator+(
+			FixedString<N1> const& fs1,
+			char const(&str)[N2])
+		{
+			FixedString<N1 + N2 - 1> result{ fs1.ToStringView() };
+
+			std::copy_n(str, N2 - 1, result.data + N1);
+
+			return result;
+		}
 
 		template <typename Member>
 		constexpr auto MemberTag()
@@ -333,7 +370,12 @@ namespace NDataStructure
 				return *this;
 			}
 
-			constexpr auto operator<=>(MemberImpl const&) const = default;
+			//constexpr auto operator<=>(MemberImpl const&) const = default;	// Note: 이 부분은 내부 컴파일러 에러를 유발하여 주석 처리
+
+			constexpr auto operator<=>(MemberImpl const& other) const
+			{
+				return value <=> other.value;
+			}
 
 			using TagType = Tag;
 			using value_type = T;
@@ -852,10 +894,16 @@ namespace NDataStructure
 
 	namespace Literals
 	{
-		template<InternalTaggedTuple::FixedString fs>
+		template <InternalTaggedTuple::FixedString fs>
 		constexpr auto operator""_tag()
 		{
 			return tag<fs>;
+		}
+
+		template <InternalTaggedTuple::FixedString fs>
+		constexpr auto operator""_fs()
+		{
+			return fs;
 		}
 	}
 }
