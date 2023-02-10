@@ -1,4 +1,6 @@
 #pragma once
+#include "MPL.h"
+#include "Util.h"
 #include "TaggedTuple.h"
 #include <cassert>
 #include <sqlite3.h>
@@ -15,19 +17,20 @@
 #include <chrono>
 #include <sstream>
 #include <filesystem>
+#include <span>
 
 // Data 추가 시 오버로딩해야할 메서드
-// StringToType: 타입 선언
+// StringToType: 타입 정의
+// TypeToString: 타입 정의
 // SqlType: 클래스 템플릿 특수화
 //  - ReadRowInto: 타입에 맞게 읽기
 //  - BindImpl: 타입에 맞게 바인딩
 //  - ToConcrete: 구체적인 타입으로 변환
-
 namespace NDatabase
 {
 	namespace Sqlite3
 	{
-		using NDataStructure::InternalTaggedTuple::FixedString;
+		using Literals::operator""_fs;
 
 		template <FixedString>
 		struct StringToType;
@@ -84,6 +87,12 @@ namespace NDatabase
 		struct StringToType<"path">
 		{
 			using type = std::filesystem::path;
+		};
+
+		template <>
+		struct StringToType<"blob">
+		{
+			using type = std::vector<unsigned char>;
 		};
 
 		template <FixedString fs>
@@ -173,6 +182,15 @@ namespace NDatabase
 			}
 		};
 
+		template <>
+		struct TypeToString<std::vector<unsigned char>>
+		{
+			static constexpr auto To()
+			{
+				return FixedString{ "blob" };
+			}
+		};
+
 		template <typename T>
 		class SqlType;
 
@@ -235,7 +253,7 @@ namespace NDatabase
 
 			inline static bool BindImpl(sqlite3_stmt* stmt, int index, int v)
 			{
-				auto r{ sqlite3_bind_int64(stmt, index, v) };
+				auto r{ sqlite3_bind_int(stmt, index, v) };
 
 				return r == SQLITE_OK;
 			}
@@ -627,6 +645,53 @@ namespace NDatabase
 			}
 		};
 
+		template <>
+		class SqlType<std::vector<unsigned char>>
+		{
+		public:
+			inline static bool ReadRowInto(sqlite3_stmt* stmt, int index, std::vector<unsigned char>& v)
+			{
+				if (auto type{ sqlite3_column_type(stmt, index) }; type == SQLITE_BLOB)
+				{
+					auto ptr{ reinterpret_cast<unsigned char const*>(sqlite3_column_blob(stmt, index)) };
+					auto length{ static_cast<std::size_t>(sqlite3_column_bytes(stmt, index)) / sizeof(unsigned char) };
+
+					if (ptr)
+					{
+						std::span<unsigned char const> s{ ptr, length };
+
+						std::ranges::copy(s, std::back_inserter(v));
+					}
+					else
+					{
+						v.clear();
+					}
+
+					return true;
+				}
+				else if (type == SQLITE_NULL)
+				{
+					return false;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			inline static bool BindImpl(sqlite3_stmt* stmt, int index, std::vector<unsigned char> v)
+			{
+				auto r{ sqlite3_bind_blob(stmt, index, std::data(v), static_cast<int>(std::ssize(v)), SQLITE_TRANSIENT) };
+
+				return r == SQLITE_OK;
+			}
+
+			inline static auto ToConcrete(std::vector<unsigned char> const& v)
+			{
+				return v;
+			}
+		};
+
 		template <typename T>
 		class SqlType<std::optional<T>>
 		{
@@ -690,60 +755,71 @@ namespace NDatabase
 			}
 		};
 
-		template <FixedString fs, typename T>
+		template <FixedString name, typename T, FixedString type_description = "NOT NULL">
 		class NameAndType
 		{
+			static_assert(type_description.contains<"NOT NULL"_fs>(), "type_description must include \"NOT NULL\"");
 		public:
 			using value_type = T;
 
 			constexpr auto Name() const
 			{
-				return fs;
+				return name;
 			}
 
 			constexpr auto operator()() const
 			{
-				return fs;
+				return name;
 			}
 
 			constexpr auto Decl() const
 			{
 				using namespace NDataStructure::Literals;
 
-				return "?/*:"_fs + fs + ":" + TypeToString<T>::To() + "*/";
+				return "?/*:"_fs + name + ":" + TypeToString<T>::To() + "*/";
 			}
 
 			constexpr auto Column() const
 			{
 				using namespace NDataStructure::Literals;
 
-				return fs + "/*:" + TypeToString<T>::To() + "*/";
+				return name + "/*:" + TypeToString<T>::To() + "*/";
+			}
+
+			constexpr auto TypeDescription() const
+			{
+				return type_description;
 			}
 		};
 
-		template <FixedString fs, typename T>
-		class NameAndType<fs, std::optional<T>>
+		template <FixedString name, typename T, FixedString type_description>
+		class NameAndType<name, std::optional<T>, type_description>
 		{
 		public:
 			using value_type = std::optional<T>;
 
 			constexpr auto Name() const
 			{
-				return fs;
+				return name;
 			}
 
 			constexpr auto Decl() const
 			{
 				using namespace NDataStructure::Literals;
 
-				return "?/*:"_fs + fs + ":" + TypeToString<T>::To() + "?*/";
+				return "?/*:"_fs + name + ":" + TypeToString<T>::To() + "?*/";
 			}
 
 			constexpr auto Column() const
 			{
 				using namespace NDataStructure::Literals;
 
-				return fs + "/*:" + TypeToString<T>::To() + "?*/";
+				return name + "/*:" + TypeToString<T>::To() + "?*/";
+			}
+
+			constexpr auto TypeDescription() const
+			{
+				return type_description;
 			}
 		};
 
@@ -1191,6 +1267,7 @@ namespace NDatabase
 			p_tuple.ForEach([&](auto& m) mutable {
 				using m_t = std::decay_t<decltype(m)>;
 				using Tag = typename m_t::TagType;
+
 				auto r{ SqlType<std::remove_cvref_t<decltype(m.Value())>>::BindImpl(stmt, index, m.Value()) };
 
 				CheckSqliteReturn<bool>(r, true);
@@ -1223,7 +1300,7 @@ namespace NDatabase
 			{
 				auto sv{ query_string.ToStringView() };
 				sqlite3_stmt* stmt;
-				auto specs{ ParseTypeSpecs<query_string>() };
+				//auto specs{ ParseTypeSpecs<query_string>() };
 				auto rc{ sqlite3_prepare_v2(sqldb, std::data(sv), static_cast<int>(std::size(sv)), &stmt, 0) };
 
 				CheckSqliteReturn(rc);
@@ -1307,18 +1384,26 @@ namespace NDatabase
 			}
 		};
 
-		template <FixedString fs, typename T>
+		// NAT = NameAndType
+		template <auto NAT, TemplateTemplateParameter<NDataStructure::InternalTaggedTuple::TaggedTuple> T>
+			requires requires { NAT.Name(); }
+		decltype(auto) Field(T&& t)
+		{
+			return NDataStructure::Get<NAT.Name()>(std::forward<T>(t));
+		}
+
+		template <FixedString fs, TemplateTemplateParameter<NDataStructure::InternalTaggedTuple::TaggedTuple> T>
 		decltype(auto) Field(T&& t)
 		{
 			return NDataStructure::Get<fs>(std::forward<T>(t));
 		}
 
 		// NAT = NameAndType
-		template <auto NAT, typename T>
+		template <auto NAT, std::convertible_to<typename decltype(NAT)::value_type> T>
 			requires requires { NAT.Name(); }
-		decltype(auto) Field(T&& t)
+		auto Bind(T&& t)
 		{
-			return NDataStructure::Get<NAT.Name()>(std::forward<T>(t));
+			return NDataStructure::tag<NAT.Name()> = std::forward<T>(t);
 		}
 
 		template <FixedString fs, typename T>
@@ -1327,27 +1412,262 @@ namespace NDatabase
 			return NDataStructure::tag<fs> = std::forward<T>(t);
 		}
 
-		// NAT = NameAndType
-		template <auto NAT, typename T>
-			requires requires { NAT.Name(); }
-		auto Bind(T&& t)
-		{
-			return NDataStructure::tag<NAT.Name()> = std::forward<T>(t);
-		}
+		using Literals::operator""_fs;
 
-		//template <typename Tag>
-		//struct ParamHelper
-		//{
-		//	template <typename T>
-		//	auto operator=(T t)
-		//	{
-		//		return MakeMember<Tag, T>(std::move(t));
-		//	}
-		//};
+		class SQLite3Manager final
+		{
+		public:
+			explicit SQLite3Manager(std::filesystem::path const& path_name)
+			{
+				assert(sqlite3_open(path_name.string().c_str(), &db) == SQLITE_OK);
+			}
+
+			~SQLite3Manager()
+			{
+				assert(sqlite3_close(db) == SQLITE_OK);
+			}
+
+			template <FixedString query_string>
+			auto PrepareStatement() const
+			{
+				return PreparedStatement<query_string>{ db };
+			}
+
+			int Version() const
+			{
+				auto opt{ PreparedStatement<
+					"PRAGMA "_fs + user_version.Column() + ";"
+				>{ db }.ExecuteSingleRow({}) };
+
+				return opt ? Field<user_version>(*opt) : 0;
+			}
+
+			template <int version>
+			void Version() const
+			{
+				PreparedStatement<
+					"PRAGMA "_fs + user_version.Name() + " = " + IntergralToString<version>() + ";"
+				>{ db }.Execute();
+			}
+
+			template <auto TableName>
+			bool ExistTable() const
+			{
+				auto opt{ PreparedStatement<
+					"SELECT count(*) AS "_fs + exist.Column() + " FROM sqlite_master WHERE TYPE = 'table' AND NAME = '"_fs
+					+ TableName + "';"
+				>{ db }.ExecuteSingleRow({}) };
+
+				return opt ? Field<exist>(*opt) : false;
+			}
+
+			template <auto TableName, auto... NATS>
+			void Create() const
+			{
+				PreparedStatement<
+					"CREATE TABLE IF NOT EXISTS "_fs + TableName + "("
+					+ MakeTypeDescriptionList(
+						NATS...
+					)
+					+ ");"
+				>{ db }.Execute();
+			}
+
+			template <auto TableName>
+			void Drop() const
+			{
+				PreparedStatement<
+					"DROP TABLE IF EXISTS "_fs + TableName + ";"
+				>{ db }.Execute();
+			}
+
+			template <auto TableName, auto... NATS>
+			auto PreparedInsert() const
+			{
+				return PreparedStatement<
+					"INSERT INTO "_fs + TableName + "("
+					+ MakeNameList(
+						NATS...
+					)
+					+ ") VALUES("
+					+ MakeDeclList(
+						NATS...
+					)
+					+ ");"
+				>{ db };
+			}
+
+			template <auto TypeName, auto... NATS>
+			auto PreparedSelect() const
+			{
+				return PreparedStatement<
+					"SELECT "_fs
+					+ MakeColumnList(
+						NATS...
+					)
+					+ " FROM " + TypeName + ";"
+				> { db };
+			}
+
+			template <auto TypeName, auto NATS, auto WHERE>
+			constexpr auto PreparedSelectWithWhere()
+			{
+				return PreparedStatement<
+					"SELECT "_fs
+					+ NATS
+					+ " FROM " + TypeName 
+					+ " WHERE " + WHERE
+					+ ";"
+				> { db };
+			}
+
+			template <auto TableName>
+			auto PreparedDelete() const
+			{
+				return PreparedStatement<
+					"DELETE FROM "_fs + TableName + ";"
+				>{ db };
+			}
+
+			template <auto TableName, auto WHERE>
+			auto PreparedDeleteWithWhere() const
+			{
+				return PreparedStatement<
+					"DELETE FROM "_fs + TableName
+					+ " WHERE " + WHERE
+					+ ";"
+				>{ db };
+			}
+
+			template <auto TableName, auto... NATS>
+			auto PreparedInsertOrReplace() const
+			{
+				return PreparedStatement<
+					"INSERT OR REPLACE INTO "_fs + TableName + "("
+					+ MakeNameList(NATS...)
+					+ ") VALUES("
+					+ MakeDeclList(NATS...)
+					+ ");"
+				>{ db };
+			}
+
+			// Helper Functions
+			template <typename T, typename... Ts>
+			static constexpr auto MakeNameList(T const& t, Ts const&... ts)
+			{
+				return (t.Name() + ... + (", "_fs + MakeNameList(ts)));
+			}
+
+			template <typename T, typename... Ts>
+			static constexpr auto MakeColumnList(T const& t, Ts const&... ts)
+			{
+				return (t.Column() + ... + (", "_fs + MakeColumnList(ts)));
+			}
+
+			template <typename T, typename... Ts>
+			static constexpr auto MakeDeclList(T const& t, Ts const&... ts)
+			{
+				return (t.Decl() + ... + (", "_fs + MakeDeclList(ts)));
+			}
+
+			template <typename T, typename... Ts>
+			static constexpr auto MakeTypeDescriptionList(T const& t, Ts const&... ts)
+			{
+				return ((t.Name() + " " + t.TypeDescription()) + ... + (", "_fs + MakeTypeDescriptionList(ts)));
+			}
+
+			template <typename T>
+			static inline constexpr bool IsStringType_v = std::is_constructible_v<std::string, T>
+				|| std::is_constructible_v<std::wstring, T>
+				|| std::is_constructible_v<std::u8string, T>
+				|| std::is_constructible_v<std::u16string, T>
+				|| std::is_constructible_v<std::u32string, T>;
+
+			template <typename T, typename From>
+			static auto To(From const& v)
+			{
+				if constexpr (requires { v.Name().ToStringView(); })
+				{
+					return std::filesystem::path{ v.Name().ToStringView() }.wstring();
+				}
+				else if constexpr (IsStringType_v<From>)
+				{
+					if constexpr (std::is_same_v<T, std::string>)
+					{
+						return std::filesystem::path{ v }.string();
+					}
+					else if constexpr (std::is_same_v<T, std::wstring>)
+					{
+						return std::filesystem::path{ v }.wstring();
+					}
+					else if constexpr (std::is_same_v<T, std::u8string>)
+					{
+						return std::filesystem::path{ v }.u8string();
+					}
+					else if constexpr (std::is_same_v<T, std::u16string>)
+					{
+						return std::filesystem::path{ v }.u16string();
+					}
+					else if constexpr (std::is_same_v<T, std::u32string>)
+					{
+						return std::filesystem::path{ v }.u32string();
+					}
+				}
+				else if constexpr (requires { *v; })
+				{
+					if (v)
+					{
+						return To<T>(*v);
+					}
+					else
+					{
+						throw std::runtime_error{ "Error!" };
+					}
+				}
+				else if constexpr (std::is_same_v<From, std::chrono::system_clock::time_point>)
+				{
+					return v;
+				}
+				else if constexpr (std::is_same_v<From, std::vector<unsigned char>>)
+				{
+					std::stringstream ss;
+
+					ss << std::hex;
+					ss << std::uppercase;
+					ss.fill('0');
+
+					for (auto c : v)
+					{
+						ss << std::setw(2) << static_cast<int>(c) << ' ';
+					}
+
+					return To<T>(ss.str());
+				}
+				else
+				{
+					return v;
+				}
+			}
+
+			template <auto NAT, TemplateTemplateParameter<NDataStructure::InternalTaggedTuple::TaggedTuple> T>
+				requires requires{
+				NAT.Name();
+			}
+			static constexpr void Print(T const& t)
+			{
+				std::wcout << std::format(L"{}: {}\n", To<std::wstring>(NAT), To<std::wstring>(Field<NAT>(t)));
+			}
+
+		private:
+			sqlite3* db{ nullptr };
+
+			static inline constexpr NameAndType<"user_version", int> user_version;
+			static inline constexpr NameAndType<"exist", bool> exist;
+		};
 	}
 
 	using Sqlite3::Bind;
 	using Sqlite3::Field;
-	using Sqlite3::PreparedStatement;
-	using Sqlite3::ToConcrete;
+	using Sqlite3::NameAndType;
+	using Sqlite3::SQLite3Manager;
 }

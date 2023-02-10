@@ -26,5 +26,14 @@
     <ClInclude Include="TaggedTuple.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MPL.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FixedString.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -134,8 +134,11 @@
     <ClCompile Include="real_test.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="FixedString.h" />
+    <ClInclude Include="MPL.h" />
     <ClInclude Include="TaggedSqlite.h" />
     <ClInclude Include="TaggedTuple.h" />
+    <ClInclude Include="Util.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
